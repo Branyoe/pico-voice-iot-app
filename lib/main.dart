@@ -1,22 +1,32 @@
 import 'dart:async';
 
-import 'package:avatar_glow/avatar_glow.dart';
 import 'package:flutter/material.dart';
-import 'package:highlight_text/highlight_text.dart';
+
+import 'package:picovoice_flutter/picovoice_manager.dart';
 import 'package:picovoice_flutter/picovoice_error.dart';
 import 'package:rhino_flutter/rhino.dart';
-import 'package:picovoice_flutter/picovoice_manager.dart';
+
+import 'package:avatar_glow/avatar_glow.dart';
+import 'package:highlight_text/highlight_text.dart';
+
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
+import 'package:voice_commands/screens/home.dart';
+import 'package:voice_commands/widgets/conect_loader.dart';
 
 void main() {
-  runApp(MaterialApp(home: MyApp()));
+  runApp(const MaterialApp(home: MyApp()));
 }
 
 class MyApp extends StatefulWidget {
+  const MyApp({super.key});
+
   @override
   State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
+  // final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final String accessKey =
       'UCaNSBWu6LiB/0ACZWpiRbFYrzQB/VTa4ymwk+pEElW+u5FcBGY1Mg==';
   final String keywordPath = "assets/keyword.ppn";
@@ -24,7 +34,14 @@ class _MyAppState extends State<MyApp> {
   final String porcupineModelPath = "assets/android/porcupine_params_es.pv";
   final String rhinoModelPath = "assets/android/rhino_params_es.pv";
 
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final TextStyle _highlightsStyle = const TextStyle(
+      color: Colors.green, fontWeight: FontWeight.w400, fontSize: 30.0);
+  late final Map<String, HighlightedWord> _highlights = {
+    'arriba': HighlightedWord(textStyle: _highlightsStyle),
+    'abajo': HighlightedWord(textStyle: _highlightsStyle),
+    'derecha': HighlightedWord(textStyle: _highlightsStyle),
+    'izquierda': HighlightedWord(textStyle: _highlightsStyle),
+  };
 
   bool isError = false;
   String errorMessage = "";
@@ -37,18 +54,15 @@ class _MyAppState extends State<MyApp> {
   String wakeWordName = "";
   String rhinoText = "Tap the button to start";
   PicovoiceManager? _picovoiceManager;
-  final TextStyle _highlightsStyle = const TextStyle(
-    color: Colors.green, 
-    fontWeight: FontWeight.w400, 
-    fontSize: 30.0
-  );
 
-  late final Map<String, HighlightedWord> _highlights = {
-    'arriba': HighlightedWord(textStyle: _highlightsStyle),
-    'abajo': HighlightedWord(textStyle: _highlightsStyle),
-    'derecha': HighlightedWord(textStyle: _highlightsStyle),
-    'izquierda': HighlightedWord(textStyle: _highlightsStyle),
-  };
+  String mqttStatusText = "Status Text";
+  bool isConnected = false;
+  bool hasError = false;
+  String errorText = "";
+
+  MqttServerClient client =
+      MqttServerClient.withPort('broker.emqx.io', 'flutter_client', 1883);
+  MqttClientPayloadBuilder builder = MqttClientPayloadBuilder();
 
   @override
   void initState() {
@@ -59,9 +73,93 @@ class _MyAppState extends State<MyApp> {
     });
 
     initPicovoice();
+    _connect();
+  }
+
+  Future<bool> mqttConnect() async {
     setState(() {
-      errorMessage = "yessss";
+      mqttStatusText = "Conectando...";
     });
+
+    client.onConnected = onConnected;
+    client.onDisconnected = onDisconnected;
+    client.onUnsubscribed = onUnsubscribed;
+    client.onSubscribed = onSubscribed;
+    client.onSubscribeFail = onSubscribeFail;
+    client.pongCallback = pong;
+
+    final MqttConnectMessage connMess =
+        MqttConnectMessage().startClean().withWillQos(MqttQos.atLeastOnce);
+    client.connectionMessage = connMess;
+
+    try {
+      await client.connect();
+    } catch (e) {
+      setState(() {
+        hasError = true;
+        errorText = e.toString();
+      });
+      client.disconnect();
+      return false;
+    }
+
+    return true;
+  }
+
+  _connect() async {
+    isConnected = await mqttConnect();
+  }
+
+  _disconnect() {
+    client.disconnect();
+  }
+
+  void onConnected() {
+    setState(() {
+      mqttStatusText = 'Connected';
+    });
+  }
+
+  void onDisconnected() {
+    setState(() {
+      mqttStatusText = 'Disconnected';
+    });
+  }
+
+  void onSubscribed(String topic) {
+    setState(() {
+      mqttStatusText = 'Subscribed topic: $topic';
+    });
+  }
+
+  void onSubscribeFail(String topic) {
+    setState(() {
+      mqttStatusText = 'Failed to subscribe topic: $topic';
+    });
+  }
+
+  void onUnsubscribed(String? topic) {
+    setState(() {
+      mqttStatusText = 'Unsubscribed topic: $topic';
+    });
+  }
+
+  void pong() {
+    setState(() {
+      mqttStatusText = 'Ping response client callback invoked';
+    });
+  }
+
+  void publishMessage(String message){
+    builder.addString(message);
+    try {
+      client.publishMessage('ihc/voice/commands', MqttQos.atLeastOnce,
+          builder.payload!);
+      builder.clear();
+    } catch (e) {
+      builder.clear();
+      isConnected = false;
+    }
   }
 
   Future<void> initPicovoice() async {
@@ -158,7 +256,7 @@ class _MyAppState extends State<MyApp> {
     setState(() {
       if (inference.isUnderstood == true) {
         rhinoText = "carrito ${inference.intent}";
-      }else{
+      } else {
         rhinoText = "Comando desconocido";
       }
       wakeWordDetected = false;
@@ -180,8 +278,14 @@ class _MyAppState extends State<MyApp> {
       }
     });
 
-    if(inference.intent == "arriba"){
-      
+    if (inference.intent == "arriba") {
+      publishMessage("arriba");
+    }else if (inference.intent == "abajo") {
+      publishMessage("abajo");
+    }else if (inference.intent == "derecha") {
+      publishMessage("derecha");
+    }else if (inference.intent == "izquierda") {
+      publishMessage("izquierda");
     }
   }
 
@@ -197,8 +301,12 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    return isConnected ? buildMainScreen() : buildConnectingScreen();
+  }
+
+  buildMainScreen() {
     return Scaffold(
-      key: _scaffoldKey,
+      // key: _scaffoldKey,
       appBar: AppBar(
         title: const Text('Picovoice Demo'),
         backgroundColor: Colors.blueAccent,
