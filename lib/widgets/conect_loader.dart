@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 Widget buildConnectingScreen(){
   return Scaffold(
     appBar: AppBar(
-      title: const Text("Voice Controller"),
+      title: const Text("Voice controller"),
       backgroundColor: Colors.blueAccent,
     ),
     body: Center(

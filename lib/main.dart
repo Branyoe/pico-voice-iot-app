@@ -308,7 +308,7 @@ class _MyAppState extends State<MyApp> {
     return Scaffold(
       // key: _scaffoldKey,
       appBar: AppBar(
-        title: const Text('Picovoice Demo'),
+        title: const Text('Voice controller'),
         backgroundColor: Colors.blueAccent,
       ),
       body: Column(
@@ -329,7 +329,7 @@ class _MyAppState extends State<MyApp> {
       ),
       floatingActionButton: AvatarGlow(
         animate: !isButtonDisabled,
-        glowColor: Theme.of(context).primaryColor,
+        glowColor: wakeWordDetected ? Colors.green : Colors.blueAccent,
         endRadius: 100.0,
         curve: Curves.easeInOut,
         duration: const Duration(milliseconds: 2000),
@@ -338,6 +338,7 @@ class _MyAppState extends State<MyApp> {
           onPressed: isProcessing ? _stopProcessing : _startProcessing,
           tooltip: 'Listen',
           enableFeedback: true,
+          backgroundColor: wakeWordDetected ? Colors.green : Colors.blueAccent,
           child: Icon(isProcessing ? Icons.mic : Icons.play_arrow),
         ),
       ),
